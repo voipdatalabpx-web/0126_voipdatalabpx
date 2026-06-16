@@ -646,6 +646,25 @@ def page_resumen(df, filtro):
             kpi_card(nom,fmt_compact(row["MINUTOS"]),
                      f"ASR {fmt_asr(row['ASR'])} · {fmt_compact(row['CALLS'])} calls",clrs5[i])
 
+    # Evolucion Diaria ENT — Llamadas · Minutos · ASR (combo)
+    section("Evolucion Diaria ENT — Llamadas · Minutos · ASR")
+    d_evo_ent = (ent.groupby("FECHA")
+                 .agg(CALLS=("CALLS_TOTAL","sum"), MINUTOS=("MINUTOS","sum"), ASR=("ASR","mean"))
+                 .reset_index().sort_values("FECHA"))
+    if not d_evo_ent.empty:
+        fig_evo_ent = grafico_evo_combo(
+            d_evo_ent,
+            color_bar="#0077E6",
+            color_minutos="#FF3B4E",
+            color_asr="#4DA6FF",
+            titulo="",
+            height=420,
+        )
+        st.plotly_chart(
+            base(fig_evo_ent, "Evolucion Diaria ENT — Llamadas · Minutos (rojo) · ASR % (verde punteado)", 420),
+            use_container_width=True,
+        )
+
     # Evolucion Minutos
     section("Evolucion Diaria — Minutos")
     col1,col2 = st.columns(2)
