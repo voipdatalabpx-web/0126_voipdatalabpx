@@ -9,6 +9,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 import os
 from glob import glob
+from io import BytesIO
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 # ── Rutas locales (desarrollo en PC) ─────────────────────────────────────────
 CARPETA_ENTRANTE = r"C:\Users\rdangelo\reportes_python_2026\darwin_ruta_entrante"
@@ -486,6 +489,75 @@ def gen_insights(filtro):
         insights.append(f'Mayor volumen SAL: <b>{top_sal.index[0]}</b> con {fmt_compact(top_sal.iloc[0])} minutos.')
 
     return insights
+
+
+# ── DIARIO — Paleta y helpers estilo "Darwin Daily Report" (Excel) ────────────
+DIARIO_C = {
+    "navy_title":  "#1F3864", "navy_sub":  "#0D1B2A", "navy_sub_txt": "#AAAAAA",
+    "green_title": "#375623", "green_sub": "#1A3A0F",
+    "orange_title":"#C55A11", "orange_sub":"#7B2D00",
+    "blue_header": "#2F5597",
+    "row_alt": "#EBF3FB", "row_base": "#FFFFFF", "row_txt": "#1A1A2E",
+    "ok_bg": "#D9F2D9", "warn_bg": "#FFF2CC", "bad_bg": "#FFD7D7",
+    "ok_txt": "#1A6B1A", "warn_txt": "#8A6D00", "bad_txt": "#B00020",
+}
+
+def estado_asr(v):
+    """Etiqueta + colores de semaforo segun ASR, igual criterio que el reporte Excel Darwin."""
+    if pd.isna(v):
+        return "-", "#F0F0F0", DIARIO_C["row_txt"]
+    if v >= 80:
+        return "✅ BUENO", DIARIO_C["ok_bg"], DIARIO_C["ok_txt"]
+    if v >= 50:
+        return "⚠️ REGULAR", DIARIO_C["warn_bg"], DIARIO_C["warn_txt"]
+    return "🔴 BAJO", DIARIO_C["bad_bg"], DIARIO_C["bad_txt"]
+
+def _diario_title(texto, sub, bg, sub_bg, sub_txt="#AAAAAA"):
+    """Barra de titulo + subtitulo estilo Excel (fondo de color, texto centrado)."""
+    st.markdown(f"""
+    <div style="background:{bg};border-radius:8px 8px 0 0;padding:10px 16px;text-align:center;">
+        <span style="color:#FFFFFF;font-family:'Rajdhani',sans-serif;font-size:1.3rem;
+                     font-weight:800;letter-spacing:.04em;text-transform:uppercase;">{texto}</span>
+    </div>
+    <div style="background:{sub_bg};border-radius:0 0 8px 8px;padding:5px 16px;
+                text-align:center;margin-bottom:12px;">
+        <span style="color:{sub_txt};font-size:0.78rem;">{sub}</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+def _diario_tabla(df_t, header_bg, cols_map, id_tabla, estado_col=True):
+    """
+    Tabla HTML estilo Excel Darwin: cabecera de color solido, filas alternadas
+    blanco/celeste, columna ESTADO con semaforo (BUENO/REGULAR/BAJO).
+    cols_map: lista de tuplas (col_df, etiqueta_visible, formatter_o_None)
+    """
+    thead = "".join(
+        f'<th style="background:{header_bg} !important;color:#FFFFFF;">{lbl}</th>'
+        for _, lbl, _ in cols_map
+    )
+    if estado_col:
+        thead += f'<th style="background:{header_bg} !important;color:#FFFFFF;">ESTADO</th>'
+
+    rows = ""
+    for i, (_, row) in enumerate(df_t.iterrows()):
+        bg = DIARIO_C["row_alt"] if i % 2 == 0 else DIARIO_C["row_base"]
+        cells = ""
+        for col, _, fmt in cols_map:
+            val = fmt(row[col]) if fmt else row[col]
+            cells += f'<td style="background:{bg};color:{DIARIO_C["row_txt"]};">{val}</td>'
+        if estado_col:
+            txt, ebg, etxt = estado_asr(row["ASR"])
+            cells += (f'<td style="background:{ebg};color:{etxt};font-weight:700;'
+                      f'text-align:center;">{txt}</td>')
+        rows += f"<tr>{cells}</tr>"
+
+    st.markdown(f"""
+    <div class="ht-wrap" style="max-height:480px;">
+    <table class="ht" id="{id_tabla}">
+        <thead><tr>{thead}</tr></thead>
+        <tbody>{rows}</tbody>
+    </table></div>
+    """, unsafe_allow_html=True)
 
 
 # ── PÁGINAS ───────────────────────────────────────────────────────────────────
@@ -1329,6 +1401,582 @@ def page_prefix_cc(df, filtro):
         )
 
 
+def _diario_insights(sal, ent):
+    """Genera las secciones de Insights & Alertas replicando el reporte Excel Darwin."""
+    def box_section(titulo):
+        st.markdown(
+            f'<div style="border-left:4px solid {DIARIO_C["navy_title"]};'
+            f'padding:6px 12px;font-weight:800;color:{C["cyan"]};margin:16px 0 8px;'
+            f'text-transform:uppercase;font-family:Rajdhani,sans-serif;font-size:0.9rem;">'
+            f'{titulo}</div>', unsafe_allow_html=True)
+
+    def item(titulo, texto, bg=None):
+        style = f'background:{bg};' if bg else ""
+        st.markdown(
+            f'<div class="insight-box" style="{style}"><b>{titulo}</b><br>'
+            f'<span style="font-size:0.82rem;">{texto}</span></div>',
+            unsafe_allow_html=True)
+
+    calls_sal, ok_sal, min_sal = sal["CALLS_TOTAL"].sum(), sal["CALLS_OK"].sum(), sal["MINUTOS"].sum()
+    calls_ent, ok_ent, min_ent = ent["CALLS_TOTAL"].sum(), ent["CALLS_OK"].sum(), ent["MINUTOS"].sum()
+    asr_sal = sal["ASR"].mean() if not sal.empty else float("nan")
+    asr_ent = ent["ASR"].mean() if not ent.empty else float("nan")
+
+    box_section("📋 Resumen Ejecutivo del Día")
+    item("📞 Volumen total de tráfico",
+         f"Se procesaron {fmt_num(calls_sal)} intentos de llamadas salientes, completando "
+         f"{fmt_num(ok_sal)} llamadas exitosas ({fmt_num(min_sal,0)} minutos). "
+         f"El ASR promedio saliente fue {fmt_asr(asr_sal)} y entrante {fmt_asr(asr_ent)}.")
+    item("📡 Cobertura de rutas",
+         f"Se registraron {sal['RUTA'].nunique()} rutas salientes activas y "
+         f"{ent['RUTA'].nunique()} rutas entrantes. El tráfico está distribuido entre "
+         f"múltiples carriers.")
+
+    box_section("🚨 Alertas Críticas · ASR Bajo")
+    hubo_alerta = False
+    for tipo, data in [("Saliente", sal), ("Entrante", ent)]:
+        if data.empty:
+            continue
+        malas = (data.groupby("RUTA").agg(ASR=("ASR", "mean"), CALLS=("CALLS_TOTAL", "sum"))
+                 .query("ASR < 30 and CALLS > 100").sort_values("CALLS", ascending=False))
+        if not malas.empty:
+            hubo_alerta = True
+            lista = " | ".join(f"{r} ({fmt_asr(a)})" for r, a in
+                                zip(malas.index[:5], malas["ASR"].iloc[:5]))
+            item(f"⚡ {tipo}: {len(malas)} rutas con ASR &lt; 30%",
+                 f"Rutas de alto volumen con ASR crítico: {lista}", bg="rgba(255,23,68,0.10)")
+    if not hubo_alerta:
+        item("✅ Sin alertas críticas de ASR", "No se detectaron rutas de alto volumen con ASR &lt; 30%.")
+
+    box_section("🏆 Rutas Destacadas · Mejor Performance")
+    hubo_destacada = False
+    for tipo, data in [("SAL", sal), ("ENT", ent)]:
+        if data.empty:
+            continue
+        buenas = (data.groupby(["RUTA", "CARRIER"])
+                  .agg(ASR=("ASR", "mean"), CALLS=("CALLS_TOTAL", "sum"), MIN=("MINUTOS", "sum"))
+                  .query("ASR >= 90 and CALLS > 500")
+                  .sort_values("CALLS", ascending=False).head(3))
+        for (ruta, carrier), row in buenas.iterrows():
+            hubo_destacada = True
+            item(f"✅ {tipo} · {ruta}",
+                 f"Carrier: {carrier} | ASR: {fmt_asr(row['ASR'])} | {fmt_num(row['CALLS'])} llamadas | "
+                 f"{fmt_num(row['MIN'],0)} min — Ruta estable y confiable.", bg="rgba(0,200,83,0.10)")
+    if not hubo_destacada:
+        item("Sin rutas destacadas", "Ninguna ruta supera el umbral de ASR ≥90% con volumen &gt;500 llamadas hoy.")
+
+    box_section("📊 Análisis por Carrier Principal")
+    if not sal.empty:
+        top_c = (sal.groupby("CARRIER")
+                 .agg(CALLS=("CALLS_TOTAL", "sum"), MIN=("MINUTOS", "sum"), ASR=("ASR", "mean"))
+                 .nlargest(3, "MIN"))
+        for carrier, row in top_c.iterrows():
+            item(f"📶 {carrier} · Saliente",
+                 f"{fmt_num(row['CALLS'])} llamadas | {fmt_num(row['MIN'],0)} min | "
+                 f"ASR promedio: {fmt_asr(row['ASR'])}")
+
+    box_section("💡 Recomendaciones Operativas")
+    recs = []
+    if not sal.empty:
+        peor = (sal.groupby("CARRIER").agg(ASR=("ASR", "mean"), CALLS=("CALLS_TOTAL", "sum"))
+                .query("CALLS > 1000").nsmallest(1, "ASR"))
+        if not peor.empty:
+            c_nom, r_ = peor.index[0], peor.iloc[0]
+            recs.append((f"⚙️ Revisión sugerida: {c_nom}",
+                         f"ASR de {fmt_asr(r_['ASR'])} con {fmt_num(r_['CALLS'])} llamadas. "
+                         f"Evaluar causa raíz y posible ajuste de ruteo o penalidad contractual."))
+    if not ent.empty:
+        malas_ent = (ent.groupby("RUTA").agg(ASR=("ASR", "mean"), CALLS=("CALLS_TOTAL", "sum"))
+                     .query("ASR < 30 and CALLS > 100"))
+        if not malas_ent.empty:
+            recs.append(("⚙️ Rutas con ASR bajo en Entrante",
+                         f"{len(malas_ent)} rutas entrantes con ASR &lt; 30%. Evaluar restricciones "
+                         f"de CPS o condicionar a mejoras de calidad."))
+    if not recs:
+        item("✅ Sin acciones urgentes", "No se detectaron anomalías relevantes para recomendar acción hoy.")
+    for t, txt in recs:
+        item(t, txt)
+
+    box_section("📈 Métricas de Referencia Rápida")
+    metricas = pd.DataFrame({
+        "MÉTRICA": ["Total Intentos", "Llamadas Exitosas", "Total Minutos", "ASR Promedio",
+                    "Rutas Activas", "Rutas ASR > 80%", "Rutas ASR < 30%"],
+        "SALIENTE": [
+            fmt_num(calls_sal), fmt_num(ok_sal), fmt_num(min_sal, 0), fmt_asr(asr_sal),
+            str(sal["RUTA"].nunique()),
+            str((sal.groupby("RUTA")["ASR"].mean() >= 80).sum()) if not sal.empty else "0",
+            str((sal.groupby("RUTA")["ASR"].mean() < 30).sum()) if not sal.empty else "0",
+        ],
+        "ENTRANTE": [
+            fmt_num(calls_ent), fmt_num(ok_ent), fmt_num(min_ent, 0), fmt_asr(asr_ent),
+            str(ent["RUTA"].nunique()),
+            str((ent.groupby("RUTA")["ASR"].mean() >= 80).sum()) if not ent.empty else "0",
+            str((ent.groupby("RUTA")["ASR"].mean() < 30).sum()) if not ent.empty else "0",
+        ],
+    })
+    _diario_tabla(metricas, DIARIO_C["navy_title"],
+                  [("MÉTRICA", "MÉTRICA", None), ("SALIENTE", "SALIENTE", None),
+                   ("ENTRANTE", "ENTRANTE", None)],
+                  "tbl_diario_metricas", estado_col=False)
+
+
+def build_diario_xlsx(dia, fecha_str):
+    """
+    Genera el reporte Diario completo en Excel (bytes), replicando el diseno del
+    'Darwin Daily Report' original: hojas Resumen, Entrante, Saliente, POIS, Insights,
+    mismos colores, encabezados y semaforo de ESTADO por ASR.
+    """
+    WHITE, DARK = "FFFFFFFF", "FF1A1A2E"
+    THIN = Side(style="thin", color="FFB0B0B0")
+    BORDER = Border(top=THIN, bottom=THIN, left=THIN, right=THIN)
+
+    def estado_fill(v):
+        if v >= 80: return "FFD9F2D9"
+        if v >= 50: return "FFFFF2CC"
+        return "FFFFD7D7"
+
+    def estado_txt(v):
+        if v >= 80: return "✅ BUENO"
+        if v >= 50: return "⚠️ REGULAR"
+        return "🔴 BAJO"
+
+    def title_row(ws, ncols, texto, bg, size=16):
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+        c = ws.cell(row=1, column=1, value=texto)
+        c.font = Font(name="Arial", size=size, bold=True, color=WHITE)
+        c.fill = PatternFill("solid", fgColor=bg)
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 21
+
+    def subtitle_row(ws, ncols, texto, bg):
+        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+        c = ws.cell(row=2, column=1, value=texto)
+        c.font = Font(name="Arial", size=10, color="FFAAAAAA")
+        c.fill = PatternFill("solid", fgColor=bg)
+        c.alignment = Alignment(horizontal="center")
+
+    ent = dia[dia["TIPO"] == "ENTRANTE"]
+    sal = dia[dia["TIPO"] == "SALIENTE"]
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    # ── Resumen ──────────────────────────────────────────────────────────────
+    ws = wb.create_sheet("Resumen")
+    title_row(ws, 10, f"DARWIN · DAILY TRAFFIC REPORT · {fecha_str}", "FF1F3864")
+    subtitle_row(ws, 10, "Tráfico Saliente · Tráfico Entrante · Análisis de Rutas", "FF0D1B2A")
+
+    for i, h in enumerate(["", "LLAMADAS TOTALES", "LLAMADAS OK", "MINUTOS", "ASR"]):
+        c = ws.cell(row=4, column=i + 1, value=h)
+        c.font = Font(name="Calibri", size=9, bold=True)
+        c.alignment = Alignment(horizontal="center")
+
+    def resumen_fila(row, label, bg, data):
+        c = ws.cell(row=row, column=1, value=label)
+        c.font = Font(name="Arial", size=8, bold=True, color=WHITE)
+        c.fill = PatternFill("solid", fgColor=bg)
+        c.alignment = Alignment(horizontal="right")
+        tot = data["CALLS_TOTAL"].sum()
+        vals = [tot, data["CALLS_OK"].sum(), data["MINUTOS"].sum(),
+                (data["CALLS_OK"].sum() / tot) if tot else 0]
+        for j, (v, f) in enumerate(zip(vals, ["#,##0", "#,##0", "#,##0.00", "0.00%"])):
+            cc = ws.cell(row=row, column=2 + j, value=v)
+            cc.font = Font(name="Arial", size=9, bold=True, color=DARK)
+            cc.number_format = f
+            cc.alignment = Alignment(horizontal="center")
+
+    resumen_fila(5, "ENTRANTES", "FF375623", ent)
+    resumen_fila(6, "SALIENTES", "FFC55A11", sal)
+
+    top_sal = (sal.groupby("CARRIER").agg(CALLS_TOTAL=("CALLS_TOTAL", "sum"),
+               MINUTOS=("MINUTOS", "sum"), ASR=("ASR", "mean")).nlargest(10, "MINUTOS").reset_index())
+    top_ent = (ent.groupby("CARRIER").agg(CALLS_TOTAL=("CALLS_TOTAL", "sum"),
+               MINUTOS=("MINUTOS", "sum"), ASR=("ASR", "mean")).nlargest(10, "MINUTOS").reset_index())
+
+    ws.merge_cells("B8:E8"); c = ws["B8"]; c.value = "🔴  TOP 10 CARRIERS · SALIENTE (por Minutos)"
+    c.font = Font(name="Arial", size=11, bold=True, color=WHITE); c.fill = PatternFill("solid", fgColor="FFC55A11")
+    ws.merge_cells("G8:J8"); c = ws["G8"]; c.value = "🟢  TOP 10 CARRIERS · ENTRANTE (por Minutos)"
+    c.font = Font(name="Arial", size=11, bold=True, color=WHITE); c.fill = PatternFill("solid", fgColor="FF375623")
+
+    for start_col in (2, 7):
+        for i, h in enumerate(["CARRIER", "CALLS TOTAL", "MINUTOS", "ASR %"]):
+            c = ws.cell(row=9, column=start_col + i, value=h)
+            c.font = Font(name="Arial", size=9, bold=True, color=WHITE)
+            c.fill = PatternFill("solid", fgColor="FF2F5597")
+            c.alignment = Alignment(horizontal="center")
+
+    for tbl, start_col in [(top_sal, 2), (top_ent, 7)]:
+        for i, (_, r) in enumerate(tbl.iterrows()):
+            row = 10 + i
+            vals = [r["CARRIER"], r["CALLS_TOTAL"], r["MINUTOS"], (r["ASR"] or 0) / 100]
+            fmts = ["General", "#,##0", "#,##0.00", "0.00%"]
+            for j, (v, f) in enumerate(zip(vals, fmts)):
+                c = ws.cell(row=row, column=start_col + j, value=v)
+                c.font = Font(name="Arial", size=9, color=DARK)
+                c.fill = PatternFill("solid", fgColor="FFEBF3FB")
+                c.number_format = f
+                c.alignment = Alignment(horizontal="left" if j == 0 else "right")
+
+    for col, w in {"A": 10, "B": 34, "C": 16, "D": 14, "E": 10, "F": 3,
+                   "G": 34, "H": 16, "I": 14, "J": 10}.items():
+        ws.column_dimensions[col].width = w
+
+    # ── Entrante / Saliente / POIS ──────────────────────────────────────────
+    def hoja_trafico(nombre, data, titulo_tipo, bg, bg_sub, origen_dest):
+        ws2 = wb.create_sheet(nombre)
+        title_row(ws2, 8, f"TRÁFICO {titulo_tipo} · DARWIN · {fecha_str}", bg)
+        subtitle_row(ws2, 8,
+            f"Total rutas: {data['RUTA'].nunique():,} | "
+            f"Total llamadas: {int(data['CALLS_TOTAL'].sum()):,} | "
+            f"Total minutos: {int(data['MINUTOS'].sum()):,}", bg_sub)
+        cols = [f"CARRIER {origen_dest}", f"RUTA {origen_dest}", "ASR %",
+                "CALLS TOTAL", "CALLS OK", "MINUTOS", "ACD (min)", "ESTADO"]
+        for i, h in enumerate(cols):
+            c = ws2.cell(row=3, column=i + 1, value=h)
+            c.font = Font(name="Arial", size=9, bold=True, color=WHITE)
+            c.fill = PatternFill("solid", fgColor=bg)
+            c.alignment = Alignment(horizontal="center")
+
+        tabla = (data.groupby(["CARRIER", "RUTA"])
+                 .agg(ASR=("ASR", "mean"), CALLS_TOTAL=("CALLS_TOTAL", "sum"),
+                      CALLS_OK=("CALLS_OK", "sum"), MINUTOS=("MINUTOS", "sum"),
+                      AVG_CALL=("AVG_CALL", "mean"))
+                 .reset_index().sort_values("CALLS_TOTAL", ascending=False))
+        for i, (_, r) in enumerate(tabla.iterrows()):
+            row = 4 + i
+            asr_v = r["ASR"] or 0
+            vals = [r["CARRIER"], r["RUTA"], asr_v / 100, r["CALLS_TOTAL"], r["CALLS_OK"],
+                    r["MINUTOS"], r["AVG_CALL"], estado_txt(asr_v)]
+            fmts = ["General", "General", "0.00%", "#,##0", "#,##0", "#,##0.00", "0.00", "General"]
+            for j, (v, f) in enumerate(zip(vals, fmts)):
+                c = ws2.cell(row=row, column=1 + j, value=v)
+                c.font = Font(name="Arial", size=9, color=DARK)
+                c.number_format = f
+                if j == 7:
+                    c.fill = PatternFill("solid", fgColor=estado_fill(asr_v))
+                    c.alignment = Alignment(horizontal="center")
+        for col, w in zip("ABCDEFGH", [36, 22, 10, 14, 12, 14, 12, 14]):
+            ws2.column_dimensions[col].width = w
+        return tabla
+
+    hoja_trafico("Entrante", ent, "ENTRANTE", "FF375623", "FF1A3A0F", "ORIGEN")
+    hoja_trafico("Saliente", sal, "SALIENTE", "FFC55A11", "FF7B2D00", "DESTINO")
+    poi = dia[dia["RUTA"].str.contains("POI", case=False, na=False) & (dia["TIPO"] == "SALIENTE")]
+    if not poi.empty:
+        hoja_trafico("POIS", poi, "POIS", "FFC55A11", "FF7B2D00", "DESTINO")
+
+    # ── Insights ─────────────────────────────────────────────────────────────
+    wsi = wb.create_sheet("Insights")
+    title_row(wsi, 10, f"INSIGHTS & ALERTAS · DARWIN · {fecha_str}", "FF0D1B2A")
+    subtitle_row(wsi, 10, "Análisis automático del tráfico diario · Rutas críticas · "
+                          "Recomendaciones operativas", "FF0D1B2A")
+    r = [4]
+
+    def sec(texto):
+        wsi.merge_cells(start_row=r[0], start_column=1, end_row=r[0], end_column=10)
+        c = wsi.cell(row=r[0], column=1, value=texto)
+        c.font = Font(name="Arial", size=10, bold=True, color=WHITE)
+        c.fill = PatternFill("solid", fgColor="FF2F5597")
+        r[0] += 1
+
+    def linea(titulo, texto, bg="FFFFFFFF"):
+        wsi.merge_cells(start_row=r[0], start_column=1, end_row=r[0], end_column=2)
+        c1 = wsi.cell(row=r[0], column=1, value=titulo)
+        c1.font = Font(name="Arial", size=9, bold=True, color=DARK)
+        c1.fill = PatternFill("solid", fgColor=bg)
+        wsi.merge_cells(start_row=r[0], start_column=3, end_row=r[0], end_column=10)
+        c2 = wsi.cell(row=r[0], column=3, value=texto)
+        c2.font = Font(name="Arial", size=9, color=DARK)
+        c2.fill = PatternFill("solid", fgColor=bg)
+        c2.alignment = Alignment(wrap_text=True, vertical="center")
+        r[0] += 1
+
+    calls_sal, ok_sal, min_sal = sal["CALLS_TOTAL"].sum(), sal["CALLS_OK"].sum(), sal["MINUTOS"].sum()
+    calls_ent, ok_ent, min_ent = ent["CALLS_TOTAL"].sum(), ent["CALLS_OK"].sum(), ent["MINUTOS"].sum()
+    asr_sal = sal["ASR"].mean() if not sal.empty else 0
+    asr_ent = ent["ASR"].mean() if not ent.empty else 0
+
+    sec("📋  RESUMEN EJECUTIVO DEL DÍA")
+    linea("📞  Volumen total de tráfico",
+          f"Se procesaron {int(calls_sal):,} intentos de llamadas salientes, completando "
+          f"{int(ok_sal):,} llamadas exitosas ({int(min_sal):,} minutos). ASR promedio "
+          f"saliente {asr_sal:.1f}% y entrante {asr_ent:.1f}%.")
+    linea("📡  Cobertura de rutas",
+          f"Se registraron {sal['RUTA'].nunique()} rutas salientes activas y "
+          f"{ent['RUTA'].nunique()} rutas entrantes.")
+
+    sec("🚨  ALERTAS CRÍTICAS · ASR BAJO")
+    for tipo, data in [("Saliente", sal), ("Entrante", ent)]:
+        if data.empty: continue
+        malas = (data.groupby("RUTA").agg(ASR=("ASR", "mean"), CALLS=("CALLS_TOTAL", "sum"))
+                 .query("ASR < 30 and CALLS > 100").sort_values("CALLS", ascending=False))
+        if not malas.empty:
+            lista = " | ".join(f"{ru} ({a:.0f}%)" for ru, a in
+                                zip(malas.index[:5], malas["ASR"].iloc[:5]))
+            linea(f"⚡  {tipo}: {len(malas)} rutas con ASR < 30%", lista, "FFFFD7D7")
+
+    sec("🏆  RUTAS DESTACADAS · MEJOR PERFORMANCE")
+    for tipo, data in [("SAL", sal), ("ENT", ent)]:
+        if data.empty: continue
+        buenas = (data.groupby(["RUTA", "CARRIER"])
+                  .agg(ASR=("ASR", "mean"), CALLS=("CALLS_TOTAL", "sum"), MIN=("MINUTOS", "sum"))
+                  .query("ASR >= 90 and CALLS > 500")
+                  .sort_values("CALLS", ascending=False).head(3))
+        for (ruta, carrier), row_ in buenas.iterrows():
+            linea(f"✅  {tipo} · {ruta}",
+                  f"Carrier: {carrier} | ASR: {row_['ASR']:.1f}% | {int(row_['CALLS']):,} llamadas | "
+                  f"{int(row_['MIN']):,} min — Ruta estable.", "FFD9F2D9")
+
+    sec("📊  ANÁLISIS POR CARRIER PRINCIPAL")
+    if not sal.empty:
+        top_c = (sal.groupby("CARRIER").agg(CALLS=("CALLS_TOTAL", "sum"), MIN=("MINUTOS", "sum"),
+                 ASR=("ASR", "mean")).nlargest(3, "MIN"))
+        for carrier, row_ in top_c.iterrows():
+            linea(f"📶  {carrier} · Saliente",
+                  f"{int(row_['CALLS']):,} llamadas | {int(row_['MIN']):,} min | "
+                  f"ASR promedio: {row_['ASR']:.1f}%")
+
+    sec("💡  RECOMENDACIONES OPERATIVAS")
+    n_recs = r[0]
+    if not sal.empty:
+        peor = (sal.groupby("CARRIER").agg(ASR=("ASR", "mean"), CALLS=("CALLS_TOTAL", "sum"))
+                .query("CALLS > 1000").nsmallest(1, "ASR"))
+        if not peor.empty:
+            c_nom, r_ = peor.index[0], peor.iloc[0]
+            linea(f"⚙️  Revisión sugerida: {c_nom}",
+                  f"ASR de {r_['ASR']:.1f}% con {int(r_['CALLS']):,} llamadas. "
+                  f"Evaluar causa raíz y ruteo.")
+    if not ent.empty:
+        malas_ent = (ent.groupby("RUTA").agg(ASR=("ASR", "mean"), CALLS=("CALLS_TOTAL", "sum"))
+                     .query("ASR < 30 and CALLS > 100"))
+        if not malas_ent.empty:
+            linea("⚙️  Rutas con ASR bajo en Entrante",
+                  f"{len(malas_ent)} rutas entrantes con ASR < 30%. Evaluar restricciones "
+                  f"de CPS o condicionar a mejoras de calidad.")
+    if r[0] == n_recs:
+        linea("✅  Sin acciones urgentes", "No se detectaron anomalías relevantes hoy.")
+
+    sec("📈  MÉTRICAS DE REFERENCIA RÁPIDA")
+    for i, h in enumerate(["MÉTRICA", "SALIENTE", "ENTRANTE", "OBSERVACIÓN"]):
+        col = i + 1 if i < 3 else 4
+        c = wsi.cell(row=r[0], column=col, value=h)
+        c.font = Font(bold=True, size=9, color=WHITE)
+        c.fill = PatternFill("solid", fgColor="FF2F5597")
+    r[0] += 1
+    metricas = [
+        ("Total Intentos", int(calls_sal), int(calls_ent), "Volumen total del día"),
+        ("Llamadas Exitosas", int(ok_sal), int(ok_ent), "Completadas efectivamente"),
+        ("Total Minutos", int(min_sal), int(min_ent), "Minutos cursados"),
+        ("ASR Promedio", f"{asr_sal:.1f}%", f"{asr_ent:.1f}%", "Tasa de respuesta promedio"),
+        ("Rutas Activas", sal["RUTA"].nunique(), ent["RUTA"].nunique(), "Rutas con tráfico"),
+    ]
+    for m in metricas:
+        for j, v in enumerate(m):
+            c = wsi.cell(row=r[0], column=j + 1, value=v)
+            c.font = Font(size=9, color=DARK)
+        r[0] += 1
+
+    for col, w in zip("ABCDEFGHIJ", [24, 14, 30, 10, 10, 10, 10, 10, 10, 10]):
+        wsi.column_dimensions[col].width = w
+
+    bio = BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
+def page_diario(df, filtro):
+    """
+    Hoja 'Diario': replica el reporte Excel 'Darwin Daily Report' dentro del dashboard,
+    con 5 sub-hojas (Resumen, Clientes, Proveedores, POIs, Insights) usando los mismos
+    colores y formato del Excel original, generado con la informacion del dia cargado.
+    Boton de descarga del reporte diario completo al final de la sub-hoja Resumen.
+    """
+    # Dia de referencia: respeta el filtro "Dia" del sidebar si esta en un solo dia;
+    # si no, usa el ultimo dia cargado en los archivos (reporte diario mas reciente).
+    if filtro["FECHA"].nunique() == 1:
+        fecha_dia = filtro["FECHA"].iloc[0]
+    else:
+        fecha_dia = df["FECHA"].max()
+    dia = df[df["FECHA"] == fecha_dia].copy()
+    fecha_str = pd.to_datetime(fecha_dia).strftime("%d/%m/%Y")
+
+    ent = dia[dia["TIPO"] == "ENTRANTE"]
+    sal = dia[dia["TIPO"] == "SALIENTE"]
+
+    sub = st.tabs(["📋 Resumen", "📞 Clientes", "📡 Proveedores", "📍 POIs", "💡 Insights"])
+
+    # ══════════════════ RESUMEN ══════════════════
+    with sub[0]:
+        _diario_title(f"DARWIN · DAILY TRAFFIC REPORT · {fecha_str}",
+                      "Tráfico Saliente · Tráfico Entrante · Análisis de Rutas",
+                      DIARIO_C["navy_title"], DIARIO_C["navy_sub"])
+
+        tot_ent = ent["CALLS_TOTAL"].sum()
+        tot_sal = sal["CALLS_TOTAL"].sum()
+        asr_ent_dia = (ent["CALLS_OK"].sum() / tot_ent * 100) if tot_ent else float("nan")
+        asr_sal_dia = (sal["CALLS_OK"].sum() / tot_sal * 100) if tot_sal else float("nan")
+
+        st.markdown(f"""
+        <table class="ht" style="width:100%;margin-bottom:16px;">
+        <thead><tr>
+            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;"></th>
+            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;">LLAMADAS TOTALES</th>
+            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;">LLAMADAS OK</th>
+            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;">MINUTOS</th>
+            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;">ASR</th>
+        </tr></thead>
+        <tbody>
+        <tr>
+            <td style="background:{DIARIO_C['green_title']};color:#fff;font-weight:800;text-align:right;">ENTRANTES</td>
+            <td style="background:{DIARIO_C['row_alt']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(tot_ent)}</td>
+            <td style="background:{DIARIO_C['row_alt']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(ent['CALLS_OK'].sum())}</td>
+            <td style="background:{DIARIO_C['row_alt']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(ent['MINUTOS'].sum(),2)}</td>
+            <td style="background:{DIARIO_C['row_alt']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_asr(asr_ent_dia)}</td>
+        </tr>
+        <tr>
+            <td style="background:{DIARIO_C['orange_title']};color:#fff;font-weight:800;text-align:right;">SALIENTES</td>
+            <td style="background:{DIARIO_C['row_base']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(tot_sal)}</td>
+            <td style="background:{DIARIO_C['row_base']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(sal['CALLS_OK'].sum())}</td>
+            <td style="background:{DIARIO_C['row_base']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(sal['MINUTOS'].sum(),2)}</td>
+            <td style="background:{DIARIO_C['row_base']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_asr(asr_sal_dia)}</td>
+        </tr>
+        </tbody></table>
+        """, unsafe_allow_html=True)
+
+        top_sal = (sal.groupby("CARRIER").agg(CALLS_TOTAL=("CALLS_TOTAL", "sum"),
+                   MINUTOS=("MINUTOS", "sum"), ASR=("ASR", "mean"))
+                   .nlargest(10, "MINUTOS").reset_index()) if not sal.empty else pd.DataFrame()
+        top_ent = (ent.groupby("CARRIER").agg(CALLS_TOTAL=("CALLS_TOTAL", "sum"),
+                   MINUTOS=("MINUTOS", "sum"), ASR=("ASR", "mean"))
+                   .nlargest(10, "MINUTOS").reset_index()) if not ent.empty else pd.DataFrame()
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f'<div style="background:{DIARIO_C["orange_title"]};color:#fff;'
+                        f'font-weight:800;padding:6px 12px;border-radius:6px 6px 0 0;'
+                        f'font-size:0.82rem;">🔴 TOP 10 CARRIERS · SALIENTE (por Minutos)</div>',
+                        unsafe_allow_html=True)
+            if not top_sal.empty:
+                _diario_tabla(top_sal, DIARIO_C["blue_header"],
+                              [("CARRIER", "CARRIER", None), ("CALLS_TOTAL", "CALLS TOTAL", fmt_num),
+                               ("MINUTOS", "MINUTOS", lambda x: fmt_num(x, 2)),
+                               ("ASR", "ASR %", fmt_asr)],
+                              "tbl_diario_top_sal", estado_col=False)
+            else:
+                st.info("Sin datos salientes para el día.")
+        with col2:
+            st.markdown(f'<div style="background:{DIARIO_C["green_title"]};color:#fff;'
+                        f'font-weight:800;padding:6px 12px;border-radius:6px 6px 0 0;'
+                        f'font-size:0.82rem;">🟢 TOP 10 CARRIERS · ENTRANTE (por Minutos)</div>',
+                        unsafe_allow_html=True)
+            if not top_ent.empty:
+                _diario_tabla(top_ent, DIARIO_C["blue_header"],
+                              [("CARRIER", "CARRIER", None), ("CALLS_TOTAL", "CALLS TOTAL", fmt_num),
+                               ("MINUTOS", "MINUTOS", lambda x: fmt_num(x, 2)),
+                               ("ASR", "ASR %", fmt_asr)],
+                              "tbl_diario_top_ent", estado_col=False)
+            else:
+                st.info("Sin datos entrantes para el día.")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        excel_bytes = build_diario_xlsx(dia, fecha_str)
+        st.download_button(
+            "⬇️  Descargar Reporte Diario Completo (Excel)",
+            data=excel_bytes,
+            file_name=f"Darwin_Daily_Report_{pd.to_datetime(fecha_dia).strftime('%d%m%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+
+    # ══════════════════ CLIENTES (Entrante) ══════════════════
+    with sub[1]:
+        if ent.empty:
+            st.info("Sin datos de tráfico entrante para el día seleccionado.")
+        else:
+            _diario_title(
+                f"TRÁFICO ENTRANTE · DARWIN · {fecha_str}",
+                f"Total rutas: {ent['RUTA'].nunique()} | "
+                f"Total llamadas: {fmt_num(ent['CALLS_TOTAL'].sum())} | "
+                f"Total minutos: {fmt_num(ent['MINUTOS'].sum())}",
+                DIARIO_C["green_title"], DIARIO_C["green_sub"])
+            tabla_ent = (ent.groupby(["CARRIER", "RUTA"])
+                         .agg(ASR=("ASR", "mean"), CALLS_TOTAL=("CALLS_TOTAL", "sum"),
+                              CALLS_OK=("CALLS_OK", "sum"), MINUTOS=("MINUTOS", "sum"),
+                              AVG_CALL=("AVG_CALL", "mean"))
+                         .reset_index().sort_values("CALLS_TOTAL", ascending=False))
+            _diario_tabla(tabla_ent, DIARIO_C["green_title"],
+                          [("CARRIER", "CARRIER ORIGEN", None), ("RUTA", "RUTA ORIGEN", None),
+                           ("ASR", "ASR %", fmt_asr), ("CALLS_TOTAL", "CALLS TOTAL", fmt_num),
+                           ("CALLS_OK", "CALLS OK", fmt_num),
+                           ("MINUTOS", "MINUTOS", lambda x: fmt_num(x, 2)),
+                           ("AVG_CALL", "ACD (min)", lambda x: fmt_num(x, 2))],
+                          "tbl_diario_clientes")
+
+    # ══════════════════ PROVEEDORES (Saliente) ══════════════════
+    with sub[2]:
+        if sal.empty:
+            st.info("Sin datos de tráfico saliente para el día seleccionado.")
+        else:
+            _diario_title(
+                f"TRÁFICO SALIENTE · DARWIN · {fecha_str}",
+                f"Total rutas: {sal['RUTA'].nunique()} | "
+                f"Total llamadas: {fmt_num(sal['CALLS_TOTAL'].sum())} | "
+                f"Total minutos: {fmt_num(sal['MINUTOS'].sum())}",
+                DIARIO_C["orange_title"], DIARIO_C["orange_sub"])
+            tabla_sal = (sal.groupby(["CARRIER", "RUTA"])
+                         .agg(ASR=("ASR", "mean"), CALLS_TOTAL=("CALLS_TOTAL", "sum"),
+                              CALLS_OK=("CALLS_OK", "sum"), MINUTOS=("MINUTOS", "sum"),
+                              AVG_CALL=("AVG_CALL", "mean"))
+                         .reset_index().sort_values("CALLS_TOTAL", ascending=False))
+            _diario_tabla(tabla_sal, DIARIO_C["orange_title"],
+                          [("CARRIER", "CARRIER DESTINO", None), ("RUTA", "RUTA DESTINO", None),
+                           ("ASR", "ASR %", fmt_asr), ("CALLS_TOTAL", "CALLS TOTAL", fmt_num),
+                           ("CALLS_OK", "CALLS OK", fmt_num),
+                           ("MINUTOS", "MINUTOS", lambda x: fmt_num(x, 2)),
+                           ("AVG_CALL", "ACD (min)", lambda x: fmt_num(x, 2))],
+                          "tbl_diario_proveedores")
+
+    # ══════════════════ POIs ══════════════════
+    with sub[3]:
+        poi = dia[dia["RUTA"].str.contains("POI", case=False, na=False) & (dia["TIPO"] == "SALIENTE")]
+        if poi.empty:
+            st.info("No se encontraron rutas POI para el día seleccionado.")
+        else:
+            _diario_title(f"TRÁFICO POIS · DARWIN · {fecha_str}",
+                          f"Total rutas: {poi['RUTA'].nunique()} | "
+                          f"Total llamadas: {fmt_num(poi['CALLS_TOTAL'].sum())}",
+                          DIARIO_C["orange_title"], DIARIO_C["orange_sub"])
+            tabla_poi = (poi.groupby(["CARRIER", "RUTA"])
+                         .agg(ASR=("ASR", "mean"), CALLS_TOTAL=("CALLS_TOTAL", "sum"),
+                              CALLS_OK=("CALLS_OK", "sum"), MINUTOS=("MINUTOS", "sum"),
+                              AVG_CALL=("AVG_CALL", "mean"))
+                         .reset_index().sort_values("CALLS_TOTAL", ascending=False))
+            _diario_tabla(tabla_poi, DIARIO_C["orange_title"],
+                          [("CARRIER", "CARRIER DESTINO", None), ("RUTA", "RUTA DESTINO", None),
+                           ("ASR", "ASR %", fmt_asr), ("CALLS_TOTAL", "CALLS TOTAL", fmt_num),
+                           ("CALLS_OK", "CALLS OK", fmt_num),
+                           ("MINUTOS", "MINUTOS", lambda x: fmt_num(x, 2)),
+                           ("AVG_CALL", "ACD (min)", lambda x: fmt_num(x, 2))],
+                          "tbl_diario_poi")
+            tot_poi = poi["CALLS_TOTAL"].sum()
+            asr_tot = (poi["CALLS_OK"].sum() / tot_poi * 100) if tot_poi else float("nan")
+            st.markdown(f"""
+            <div class="insight-box" style="margin-top:10px;">
+                <b>TOTAL POIs</b> — Calls: <b>{fmt_num(poi['CALLS_TOTAL'].sum())}</b> ·
+                Calls OK: <b>{fmt_num(poi['CALLS_OK'].sum())}</b> ·
+                Minutos: <b>{fmt_num(poi['MINUTOS'].sum(),2)}</b> ·
+                ASR: <b>{fmt_asr(asr_tot)}</b>
+            </div>""", unsafe_allow_html=True)
+
+    # ══════════════════ INSIGHTS ══════════════════
+    with sub[4]:
+        _diario_title(f"INSIGHTS & ALERTAS · DARWIN · {fecha_str}",
+                      "Análisis automático del tráfico diario · Rutas críticas · "
+                      "Recomendaciones operativas",
+                      DIARIO_C["navy_title"], DIARIO_C["navy_sub"])
+        _diario_insights(sal, ent)
+
+
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
     st.set_page_config(
@@ -1408,12 +2056,13 @@ def main():
     if filtro.empty:
         st.warning("Sin datos para los filtros seleccionados."); st.stop()
 
-    tabs = st.tabs(["Resumen","Clientes","Proveedores","POIs IPLAN","Prefix CC"])
+    tabs = st.tabs(["Resumen","Clientes","Proveedores","POIs IPLAN","Prefix CC","Diario"])
     with tabs[0]: page_resumen(df,filtro)
     with tabs[1]: page_clientes(df,filtro)
     with tabs[2]: page_salientes(df,filtro)
     with tabs[3]: page_poi(df,filtro)
     with tabs[4]: page_prefix_cc(df,filtro)
+    with tabs[5]: page_diario(df,filtro)
 
 if __name__ == "__main__":
     main()
