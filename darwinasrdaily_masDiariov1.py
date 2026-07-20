@@ -148,8 +148,8 @@ def inject_css():
         border:1px solid {C['border']}; gap:3px; margin-top:4px;
     }}
     .stTabs [data-baseweb="tab"] {{
-        font-family:'Rajdhani',sans-serif; font-weight:600; font-size:0.85rem;
-        color:{C['muted']} !important; border-radius:7px; padding:5px 14px;
+        font-family:'Rajdhani',sans-serif; font-weight:800; font-size:0.85rem;
+        color:{C['white']} !important; border-radius:7px; padding:5px 14px;
     }}
     .stTabs [aria-selected="true"] {{
         color:{C['cyan']} !important; background:{C['card']} !important;
@@ -2056,13 +2056,13 @@ def main():
     if filtro.empty:
         st.warning("Sin datos para los filtros seleccionados."); st.stop()
 
-    tabs = st.tabs(["Resumen","Clientes","Proveedores","POIs IPLAN","Prefix CC","Diario"])
-    with tabs[0]: page_resumen(df,filtro)
-    with tabs[1]: page_clientes(df,filtro)
-    with tabs[2]: page_salientes(df,filtro)
-    with tabs[3]: page_poi(df,filtro)
-    with tabs[4]: page_prefix_cc(df,filtro)
-    with tabs[5]: page_diario(df,filtro)
+    tabs = st.tabs(["Diario Darwin","Acum.Mensual","Mes.Clientes","Mes.Proveedores","Mes.POIs IPLAN","Mes.Prefix CC"])
+    with tabs[0]: page_diario(df,filtro)
+    with tabs[1]: page_resumen(df,filtro)
+    with tabs[2]: page_clientes(df,filtro)
+    with tabs[3]: page_salientes(df,filtro)
+    with tabs[4]: page_poi(df,filtro)
+    with tabs[5]: page_prefix_cc(df,filtro)
 
 if __name__ == "__main__":
     main()
