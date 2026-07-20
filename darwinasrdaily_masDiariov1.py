@@ -527,16 +527,19 @@ def _diario_title(texto, sub, bg, sub_bg, sub_txt="#AAAAAA"):
 
 def _diario_tabla(df_t, header_bg, cols_map, id_tabla, estado_col=True):
     """
-    Tabla HTML estilo Excel Darwin: cabecera de color solido, filas alternadas
-    blanco/celeste, columna ESTADO con semaforo (BUENO/REGULAR/BAJO).
+    Tabla HTML estilo Excel Darwin: cabecera de color solido y centrada, filas
+    alternadas blanco/celeste con todos los valores alineados a la izquierda,
+    columna ESTADO con semaforo (BUENO/REGULAR/BAJO).
     cols_map: lista de tuplas (col_df, etiqueta_visible, formatter_o_None)
     """
     thead = "".join(
-        f'<th style="background:{header_bg} !important;color:#FFFFFF;">{lbl}</th>'
+        f'<th style="background:{header_bg} !important;color:#FFFFFF;'
+        f'text-align:center !important;">{lbl}</th>'
         for _, lbl, _ in cols_map
     )
     if estado_col:
-        thead += f'<th style="background:{header_bg} !important;color:#FFFFFF;">ESTADO</th>'
+        thead += (f'<th style="background:{header_bg} !important;color:#FFFFFF;'
+                  f'text-align:center !important;">ESTADO</th>')
 
     rows = ""
     for i, (_, row) in enumerate(df_t.iterrows()):
@@ -544,11 +547,12 @@ def _diario_tabla(df_t, header_bg, cols_map, id_tabla, estado_col=True):
         cells = ""
         for col, _, fmt in cols_map:
             val = fmt(row[col]) if fmt else row[col]
-            cells += f'<td style="background:{bg};color:{DIARIO_C["row_txt"]};">{val}</td>'
+            cells += (f'<td style="background:{bg};color:{DIARIO_C["row_txt"]};'
+                      f'text-align:left;">{val}</td>')
         if estado_col:
             txt, ebg, etxt = estado_asr(row["ASR"])
             cells += (f'<td style="background:{ebg};color:{etxt};font-weight:700;'
-                      f'text-align:center;">{txt}</td>')
+                      f'text-align:left;">{txt}</td>')
         rows += f"<tr>{cells}</tr>"
 
     st.markdown(f"""
@@ -558,6 +562,7 @@ def _diario_tabla(df_t, header_bg, cols_map, id_tabla, estado_col=True):
         <tbody>{rows}</tbody>
     </table></div>
     """, unsafe_allow_html=True)
+
 
 
 # ── PÁGINAS ───────────────────────────────────────────────────────────────────
@@ -1819,26 +1824,26 @@ def page_diario(df, filtro):
         st.markdown(f"""
         <table class="ht" style="width:100%;margin-bottom:16px;">
         <thead><tr>
-            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;"></th>
-            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;">LLAMADAS TOTALES</th>
-            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;">LLAMADAS OK</th>
-            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;">MINUTOS</th>
-            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;">ASR</th>
+            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;text-align:center !important;"></th>
+            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;text-align:center !important;">LLAMADAS TOTALES</th>
+            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;text-align:center !important;">LLAMADAS OK</th>
+            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;text-align:center !important;">MINUTOS</th>
+            <th style="background:{DIARIO_C['blue_header']} !important;color:#fff;text-align:center !important;">ASR</th>
         </tr></thead>
         <tbody>
         <tr>
             <td style="background:{DIARIO_C['green_title']};color:#fff;font-weight:800;text-align:right;">ENTRANTES</td>
-            <td style="background:{DIARIO_C['row_alt']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(tot_ent)}</td>
-            <td style="background:{DIARIO_C['row_alt']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(ent['CALLS_OK'].sum())}</td>
-            <td style="background:{DIARIO_C['row_alt']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(ent['MINUTOS'].sum(),2)}</td>
-            <td style="background:{DIARIO_C['row_alt']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_asr(asr_ent_dia)}</td>
+            <td style="background:{DIARIO_C['row_alt']};text-align:left;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(tot_ent)}</td>
+            <td style="background:{DIARIO_C['row_alt']};text-align:left;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(ent['CALLS_OK'].sum())}</td>
+            <td style="background:{DIARIO_C['row_alt']};text-align:left;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(ent['MINUTOS'].sum())}</td>
+            <td style="background:{DIARIO_C['row_alt']};text-align:left;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_asr(asr_ent_dia)}</td>
         </tr>
         <tr>
             <td style="background:{DIARIO_C['orange_title']};color:#fff;font-weight:800;text-align:right;">SALIENTES</td>
-            <td style="background:{DIARIO_C['row_base']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(tot_sal)}</td>
-            <td style="background:{DIARIO_C['row_base']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(sal['CALLS_OK'].sum())}</td>
-            <td style="background:{DIARIO_C['row_base']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(sal['MINUTOS'].sum(),2)}</td>
-            <td style="background:{DIARIO_C['row_base']};text-align:center;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_asr(asr_sal_dia)}</td>
+            <td style="background:{DIARIO_C['row_base']};text-align:left;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(tot_sal)}</td>
+            <td style="background:{DIARIO_C['row_base']};text-align:left;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(sal['CALLS_OK'].sum())}</td>
+            <td style="background:{DIARIO_C['row_base']};text-align:left;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_num(sal['MINUTOS'].sum())}</td>
+            <td style="background:{DIARIO_C['row_base']};text-align:left;color:{DIARIO_C['row_txt']};font-weight:700;">{fmt_asr(asr_sal_dia)}</td>
         </tr>
         </tbody></table>
         """, unsafe_allow_html=True)
@@ -1859,7 +1864,7 @@ def page_diario(df, filtro):
             if not top_sal.empty:
                 _diario_tabla(top_sal, DIARIO_C["blue_header"],
                               [("CARRIER", "CARRIER", None), ("CALLS_TOTAL", "CALLS TOTAL", fmt_num),
-                               ("MINUTOS", "MINUTOS", lambda x: fmt_num(x, 2)),
+                               ("MINUTOS", "MINUTOS", fmt_num),
                                ("ASR", "ASR %", fmt_asr)],
                               "tbl_diario_top_sal", estado_col=False)
             else:
@@ -1872,7 +1877,7 @@ def page_diario(df, filtro):
             if not top_ent.empty:
                 _diario_tabla(top_ent, DIARIO_C["blue_header"],
                               [("CARRIER", "CARRIER", None), ("CALLS_TOTAL", "CALLS TOTAL", fmt_num),
-                               ("MINUTOS", "MINUTOS", lambda x: fmt_num(x, 2)),
+                               ("MINUTOS", "MINUTOS", fmt_num),
                                ("ASR", "ASR %", fmt_asr)],
                               "tbl_diario_top_ent", estado_col=False)
             else:
@@ -1908,7 +1913,7 @@ def page_diario(df, filtro):
                           [("CARRIER", "CARRIER ORIGEN", None), ("RUTA", "RUTA ORIGEN", None),
                            ("ASR", "ASR %", fmt_asr), ("CALLS_TOTAL", "CALLS TOTAL", fmt_num),
                            ("CALLS_OK", "CALLS OK", fmt_num),
-                           ("MINUTOS", "MINUTOS", lambda x: fmt_num(x, 2)),
+                           ("MINUTOS", "MINUTOS", fmt_num),
                            ("AVG_CALL", "ACD (min)", lambda x: fmt_num(x, 2))],
                           "tbl_diario_clientes")
 
@@ -1932,7 +1937,7 @@ def page_diario(df, filtro):
                           [("CARRIER", "CARRIER DESTINO", None), ("RUTA", "RUTA DESTINO", None),
                            ("ASR", "ASR %", fmt_asr), ("CALLS_TOTAL", "CALLS TOTAL", fmt_num),
                            ("CALLS_OK", "CALLS OK", fmt_num),
-                           ("MINUTOS", "MINUTOS", lambda x: fmt_num(x, 2)),
+                           ("MINUTOS", "MINUTOS", fmt_num),
                            ("AVG_CALL", "ACD (min)", lambda x: fmt_num(x, 2))],
                           "tbl_diario_proveedores")
 
@@ -1955,7 +1960,7 @@ def page_diario(df, filtro):
                           [("CARRIER", "CARRIER DESTINO", None), ("RUTA", "RUTA DESTINO", None),
                            ("ASR", "ASR %", fmt_asr), ("CALLS_TOTAL", "CALLS TOTAL", fmt_num),
                            ("CALLS_OK", "CALLS OK", fmt_num),
-                           ("MINUTOS", "MINUTOS", lambda x: fmt_num(x, 2)),
+                           ("MINUTOS", "MINUTOS", fmt_num),
                            ("AVG_CALL", "ACD (min)", lambda x: fmt_num(x, 2))],
                           "tbl_diario_poi")
             tot_poi = poi["CALLS_TOTAL"].sum()
@@ -1964,7 +1969,7 @@ def page_diario(df, filtro):
             <div class="insight-box" style="margin-top:10px;">
                 <b>TOTAL POIs</b> — Calls: <b>{fmt_num(poi['CALLS_TOTAL'].sum())}</b> ·
                 Calls OK: <b>{fmt_num(poi['CALLS_OK'].sum())}</b> ·
-                Minutos: <b>{fmt_num(poi['MINUTOS'].sum(),2)}</b> ·
+                Minutos: <b>{fmt_num(poi['MINUTOS'].sum())}</b> ·
                 ASR: <b>{fmt_asr(asr_tot)}</b>
             </div>""", unsafe_allow_html=True)
 
